@@ -1,0 +1,5 @@
+{
+  "name": "Virtual Network Lab (Phòng Thực Hành Mạng Ảo)",
+  "description": "Một ứng dụng thực hành mạng ảo cho phép người dùng xây dựng mạng LAN bằng cách kết nối PC và Switch thông qua cáp mạng, tích hợp trợ lý AI để hướng dẫn.",
+  "requestFramePermissions": []
+}
