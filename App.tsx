@@ -4,7 +4,7 @@ import {
   Monitor, Network, Trash2, Cable, Activity, Settings, Terminal, 
   Router as RouterIcon, Globe, Cloud, Zap, XCircle, ZoomIn, ZoomOut, 
   Smartphone, Tablet, Watch, Laptop, Wifi, Send, ChevronRight, Lock, WifiHigh,
-  Cpu
+  Cpu, Link as LinkIcon, Database
 } from 'lucide-react';
 import { Device, DeviceType, Connection, Log, ToolMode, ChatMessage } from './types';
 import { getNetworkAdvice } from './services/geminiService';
@@ -20,6 +20,8 @@ const generateMac = () => {
   }
   return mac;
 };
+
+const isWirelessClient = (type: DeviceType) => ['mobile', 'tablet', 'watch'].includes(type);
 
 const Led = ({ status }: { status: 'off' | 'on' | 'activity' | 'error' }) => {
   let color = 'bg-slate-800';
@@ -93,6 +95,16 @@ export default function NetworkLab() {
     addLog(`Đã thêm ${newDevice.name}`, 'info');
   };
 
+  const getWiredConnectionCount = (deviceId: string) => {
+    return connections.filter(c => {
+      if (c.sourceId !== deviceId && c.targetId !== deviceId) return false;
+      const s = devices.find(d => d.id === c.sourceId);
+      const t = devices.find(d => d.id === c.targetId);
+      if (!s || !t) return false;
+      return !isWirelessClient(s.type) && !isWirelessClient(t.type);
+    }).length;
+  };
+
   const handleMouseDown = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
     if (mode === ToolMode.DELETE) {
@@ -113,33 +125,30 @@ export default function NetworkLab() {
           return;
         }
 
-        // Logic check connections
         const sourceDev = devices.find(d => d.id === cableStart);
         const targetDev = devices.find(d => d.id === id);
         if (!sourceDev || !targetDev) return;
 
-        // Check wireless
-        const isWireless = ['mobile', 'tablet', 'watch'].includes(sourceDev.type) || ['mobile', 'tablet', 'watch'].includes(targetDev.type);
-        const hasAP = sourceDev.type === 'access_point' || targetDev.type === 'access_point';
+        const isCurrentActionWireless = isWirelessClient(sourceDev.type) || isWirelessClient(targetDev.type);
+        const hasAPInvolved = sourceDev.type === 'access_point' || targetDev.type === 'access_point';
         
-        if (isWireless && !hasAP) {
-          addLog('Thiết bị di động chỉ kết nối được với Access Point!', 'error');
-          setCableStart(null);
-          return;
-        }
-
-        // Check ports
-        const sourceConns = connections.filter(c => c.sourceId === cableStart || c.targetId === cableStart).length;
-        const targetConns = connections.filter(c => c.sourceId === id || c.targetId === id).length;
-
-        if (!isWireless) {
-          if (sourceDev.ports !== 99 && sourceConns >= sourceDev.ports) {
-            addLog(`${sourceDev.name} đã hết cổng kết nối!`, 'error');
+        if (isCurrentActionWireless) {
+          if (!hasAPInvolved) {
+            addLog('Thiết bị di động chỉ có thể kết nối không dây với Access Point!', 'error');
             setCableStart(null);
             return;
           }
-          if (targetDev.ports !== 99 && targetConns >= targetDev.ports) {
-            addLog(`${targetDev.name} đã hết cổng kết nối!`, 'error');
+        } else {
+          const sourceWiredCount = getWiredConnectionCount(cableStart);
+          const targetWiredCount = getWiredConnectionCount(id);
+
+          if (sourceDev.ports !== 99 && sourceWiredCount >= sourceDev.ports) {
+            addLog(`${sourceDev.name} đã hết cổng LAN vật lý!`, 'error');
+            setCableStart(null);
+            return;
+          }
+          if (targetDev.ports !== 99 && targetWiredCount >= targetDev.ports) {
+            addLog(`${targetDev.name} đã hết cổng LAN vật lý!`, 'error');
             setCableStart(null);
             return;
           }
@@ -148,7 +157,7 @@ export default function NetworkLab() {
         const newConn: Connection = { id: `${cableStart}-${id}`, sourceId: cableStart, targetId: id };
         setConnections([...connections, newConn]);
         setCableStart(null);
-        addLog(isWireless ? 'Kết nối Wifi thành công!' : 'Cắm dây mạng thành công!', 'success');
+        addLog(isCurrentActionWireless ? 'Kết nối Wifi thành công!' : 'Cắm dây mạng thành công!', 'success');
       }
       return;
     }
@@ -161,6 +170,14 @@ export default function NetworkLab() {
         const rect = workspaceRef.current.getBoundingClientRect();
         setOffset({ x: (e.clientX - rect.left) / zoom - dev.x, y: (e.clientY - rect.top) / zoom - dev.y });
       }
+    }
+  };
+
+  const handleDeleteConnection = (e: React.MouseEvent, connectionId: string) => {
+    if (mode === ToolMode.DELETE) {
+      e.stopPropagation();
+      setConnections(connections.filter(c => c.id !== connectionId));
+      addLog('Đã xóa cáp nối', 'error');
     }
   };
 
@@ -215,7 +232,6 @@ export default function NetworkLab() {
       return;
     }
 
-    // BFS for path finding
     const queue = [source.id];
     const visited = new Set<string>();
     visited.add(source.id);
@@ -242,7 +258,6 @@ export default function NetworkLab() {
     setChatHistory(prev => [...prev, { role: 'user', content: msg }]);
     setIsAiLoading(true);
 
-    // Transform devices/links to standard format for the service
     const nodes = devices.map(d => ({ ...d, label: d.name }));
     const links = connections.map(c => ({ ...c, sourceId: c.sourceId, targetId: c.targetId }));
     
@@ -267,7 +282,7 @@ export default function NetworkLab() {
       const p2 = getCenter(tgt);
 
       const isWan = src.type === 'isp' || tgt.type === 'isp' || src.type === 'modem' || tgt.type === 'modem';
-      const isWireless = ['mobile', 'tablet', 'watch'].includes(src.type) || ['mobile', 'tablet', 'watch'].includes(tgt.type);
+      const isWireless = isWirelessClient(src.type) || isWirelessClient(tgt.type);
       
       let stroke = "#3b82f6";
       let dash = "";
@@ -275,8 +290,26 @@ export default function NetworkLab() {
       if (isWireless) { stroke = "#a855f7"; dash = "4,4"; }
 
       return (
-        <g key={conn.id}>
-          <line x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} stroke={stroke} strokeWidth="3" strokeDasharray={dash} className="opacity-70" />
+        <g 
+          key={conn.id} 
+          className={`${mode === ToolMode.DELETE ? 'cursor-pointer' : 'pointer-events-none'}`}
+          onClick={(e) => handleDeleteConnection(e, conn.id)}
+        >
+          {/* Invisible thicker hitbox for easier clicking */}
+          <line 
+            x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} 
+            stroke="transparent" 
+            strokeWidth="15" 
+            className="pointer-events-auto"
+          />
+          {/* Visible line */}
+          <line 
+            x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} 
+            stroke={stroke} 
+            strokeWidth="3" 
+            strokeDasharray={dash} 
+            className={`opacity-70 transition-colors ${mode === ToolMode.DELETE ? 'hover:stroke-red-500' : ''}`}
+          />
           {isWireless && (
             <circle cx={(p1.x + p2.x)/2} cy={(p1.y + p2.y)/2} r="4" fill="#a855f7" className="animate-ping opacity-50" />
           )}
@@ -286,6 +319,7 @@ export default function NetworkLab() {
   };
 
   const currentSelected = devices.find(d => d.id === selectedDevice);
+  const isInternetConnected = currentSelected ? checkConnectionToType(currentSelected.id, 'isp') : false;
 
   return (
     <div className="flex h-screen bg-slate-900 overflow-hidden font-sans text-slate-100">
@@ -375,6 +409,18 @@ export default function NetworkLab() {
                 <Settings size={12}/> Thuộc tính: {currentSelected.name}
               </h2>
               <div className="space-y-3">
+                {['router', 'switch', 'access_point', 'modem'].includes(currentSelected.type) && (
+                  <div className="bg-slate-800/50 p-2 rounded-lg border border-slate-700/50 flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <Globe size={14} className={isInternetConnected ? 'text-green-400' : 'text-slate-500'} />
+                      <span className="text-[10px] font-bold text-slate-300">INTERNET</span>
+                    </div>
+                    <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded ${isInternetConnected ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                      {isInternetConnected ? 'Online' : 'Offline'}
+                    </span>
+                  </div>
+                )}
+
                 {currentSelected.ip !== undefined && (
                   <div>
                     <label className="block text-[9px] text-slate-500 font-bold mb-1 uppercase tracking-tight">ĐỊA CHỈ IP</label>
@@ -386,31 +432,40 @@ export default function NetworkLab() {
                   </div>
                 )}
 
-                {/* --- Cấu hình Access Point --- */}
-                {currentSelected.type === 'access_point' && (
-                  <div className="pt-2 border-t border-slate-800 space-y-3">
-                    <div>
-                      <label className="flex items-center gap-1 text-[9px] text-slate-500 font-bold mb-1 uppercase tracking-tight">
-                        <WifiHigh size={10} /> TÊN TRUY CẬP (SSID)
-                      </label>
-                      <input 
-                        className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-blue-300 focus:border-blue-500 outline-none"
-                        value={currentSelected.ssid || ''}
-                        onChange={(e) => setDevices(devices.map(d => d.id === currentSelected.id ? { ...d, ssid: e.target.value } : d))}
-                      />
-                    </div>
-                    <div>
-                      <label className="flex items-center gap-1 text-[9px] text-slate-500 font-bold mb-1 uppercase tracking-tight">
-                        <Lock size={10} /> MẬT KHẨU WIFI
-                      </label>
-                      <input 
-                        type="password"
-                        className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-blue-300 focus:border-blue-500 outline-none"
-                        value={currentSelected.password || ''}
-                        onChange={(e) => setDevices(devices.map(d => d.id === currentSelected.id ? { ...d, password: e.target.value } : d))}
-                      />
-                    </div>
-                  </div>
+                {currentSelected.type === 'switch' && (
+                   <div className="pt-2 border-t border-slate-800 space-y-2">
+                      <div className="flex items-center gap-2 text-[10px] font-bold text-slate-400 mb-1">
+                        <Database size={12} className="text-blue-400" /> BẢNG ĐỊA CHỈ MAC (CAM)
+                      </div>
+                      <div className="bg-slate-950 rounded border border-slate-700 overflow-hidden max-h-40 overflow-y-auto shadow-inner">
+                        <table className="w-full text-[9px] font-mono">
+                          <thead className="bg-slate-800 text-slate-500 sticky top-0 border-b border-slate-700">
+                            <tr>
+                              <th className="p-1.5 text-left pl-2">Port</th>
+                              <th className="p-1.5 text-left">MAC</th>
+                              <th className="p-1.5 text-left">Type</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {connections.filter(c => c.sourceId === selectedDevice || c.targetId === selectedDevice).length > 0 ? (
+                              connections.filter(c => c.sourceId === selectedDevice || c.targetId === selectedDevice).map((c, i) => {
+                                const otherId = c.sourceId === selectedDevice ? c.targetId : c.sourceId;
+                                const dev = devices.find(d => d.id === otherId);
+                                return dev ? (
+                                  <tr key={i} className="border-t border-slate-900 hover:bg-slate-900/50 transition-colors">
+                                    <td className="p-1.5 pl-2 text-blue-400 font-bold">Fa0/{i+1}</td>
+                                    <td className="p-1.5 text-slate-300">{dev.mac}</td>
+                                    <td className="p-1.5 text-slate-500 italic">Dynamic</td>
+                                  </tr>
+                                ) : null;
+                              })
+                            ) : (
+                              <tr><td colSpan={3} className="p-4 text-center text-slate-600 italic">Trống</td></tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                   </div>
                 )}
 
                 <div>
@@ -419,33 +474,9 @@ export default function NetworkLab() {
                 </div>
 
                 {['pc', 'laptop', 'router'].includes(currentSelected.type) && (
-                  <button onClick={() => { setIsPingModalOpen(true); setLogs([]); }} className="w-full py-2 bg-slate-700 hover:bg-slate-600 rounded text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-2">
+                  <button onClick={() => { setIsPingModalOpen(true); setLogs([]); }} className="w-full py-2 bg-slate-700 hover:bg-slate-600 rounded text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-all active:scale-95 shadow-lg">
                     <Terminal size={12} /> Giao diện CLI
                   </button>
-                )}
-                {currentSelected.type === 'switch' && (
-                  <div className="mt-4">
-                    <p className="text-[10px] font-bold text-slate-400 mb-2">MAC Table (CAM):</p>
-                    <div className="bg-slate-800 rounded border border-slate-700 max-h-32 overflow-y-auto">
-                      <table className="w-full text-[9px]">
-                        <thead className="bg-slate-700 text-slate-400 sticky top-0">
-                          <tr><th className="p-1 text-left pl-2">Port</th><th className="p-1 text-left">MAC Address</th></tr>
-                        </thead>
-                        <tbody>
-                          {connections.filter(c => c.sourceId === selectedDevice || c.targetId === selectedDevice).map((c, i) => {
-                            const otherId = c.sourceId === selectedDevice ? c.targetId : c.sourceId;
-                            const dev = devices.find(d => d.id === otherId);
-                            return dev ? (
-                              <tr key={i} className="border-t border-slate-700/50">
-                                <td className="p-1 pl-2 text-blue-400">Fa0/{i+1}</td>
-                                <td className="p-1 font-mono text-slate-300">{dev.mac}</td>
-                              </tr>
-                            ) : null;
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
                 )}
               </div>
             </section>
@@ -455,9 +486,8 @@ export default function NetworkLab() {
 
       {/* Main Content */}
       <main className="flex-1 flex flex-col relative bg-slate-900">
-        {/* Toolbar Top */}
         <div className="absolute top-4 left-4 right-4 z-10 flex justify-between items-center pointer-events-none">
-          <div className="bg-slate-800/80 backdrop-blur px-4 py-2 rounded-full border border-slate-700 text-[10px] font-bold text-slate-400 flex items-center gap-4 pointer-events-auto">
+          <div className="bg-slate-800/80 backdrop-blur px-4 py-2 rounded-full border border-slate-700 text-[10px] font-bold text-slate-400 flex items-center gap-4 pointer-events-auto shadow-2xl">
              <div className="flex items-center gap-2">
                 <span className={`w-2 h-2 rounded-full animate-pulse ${mode === ToolMode.MOVE ? 'bg-blue-400' : mode === ToolMode.CABLE ? 'bg-amber-400' : 'bg-red-400'}`}></span>
                 CHẾ ĐỘ: {mode.toUpperCase()}
@@ -467,13 +497,12 @@ export default function NetworkLab() {
           </div>
 
           <div className="flex gap-2 pointer-events-auto">
-            <button onClick={() => setZoom(Math.max(0.5, zoom - 0.1))} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg border border-slate-700 shadow-xl"><ZoomOut size={16}/></button>
-            <div className="bg-slate-800 px-3 flex items-center text-xs font-bold rounded-lg border border-slate-700">{Math.round(zoom * 100)}%</div>
-            <button onClick={() => setZoom(Math.min(2, zoom + 0.1))} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg border border-slate-700 shadow-xl"><ZoomIn size={16}/></button>
+            <button onClick={() => setZoom(Math.max(0.5, zoom - 0.1))} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg border border-slate-700 shadow-xl transition-all active:scale-90"><ZoomOut size={16}/></button>
+            <div className="bg-slate-800 px-3 flex items-center text-xs font-bold rounded-lg border border-slate-700 shadow-xl">{Math.round(zoom * 100)}%</div>
+            <button onClick={() => setZoom(Math.min(2, zoom + 0.1))} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg border border-slate-700 shadow-xl transition-all active:scale-90"><ZoomIn size={16}/></button>
           </div>
         </div>
 
-        {/* Workspace Canvas */}
         <div 
           ref={workspaceRef}
           className="flex-1 overflow-auto cursor-crosshair canvas-grid relative"
@@ -481,14 +510,15 @@ export default function NetworkLab() {
           onMouseUp={handleMouseUp}
         >
           <div style={{ transform: `scale(${zoom})`, transformOrigin: '0 0', width: '200%', height: '200%' }}>
-            <svg className="absolute top-0 left-0 w-full h-full pointer-events-none">
+            {/* REMOVED pointer-events-none from SVG to allow cable interaction */}
+            <svg className="absolute top-0 left-0 w-full h-full">
               {renderCables()}
               {cableStart && (
                 <line 
                   x1={devices.find(d => d.id === cableStart)!.x + 32} 
                   y1={devices.find(d => d.id === cableStart)!.y + 32} 
-                  x2={0} y2={0} // Placeholder for dynamic line logic if needed
-                  stroke="#60a5fa" strokeWidth="2" strokeDasharray="4,4" className="opacity-50"
+                  x2={0} y2={0} 
+                  stroke="#60a5fa" strokeWidth="2" strokeDasharray="4,4" className="opacity-50 pointer-events-none"
                 />
               )}
             </svg>
@@ -502,21 +532,20 @@ export default function NetworkLab() {
                   style={{ left: device.x, top: device.y }}
                   onMouseDown={(e) => handleMouseDown(e, device.id)}
                 >
-                  <div className={`p-2 rounded-xl border-2 transition-all ${
+                  <div className={`p-2 rounded-xl border-2 transition-all duration-300 ${
                     selectedDevice === device.id 
-                      ? 'bg-blue-600/20 border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.3)]' 
+                      ? 'bg-blue-600/20 border-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.4)] scale-110' 
                       : cableStart === device.id
-                      ? 'bg-amber-500/20 border-amber-500'
+                      ? 'bg-amber-500/20 border-amber-500 scale-105'
                       : 'bg-slate-800 border-slate-700 hover:border-slate-500'
                   }`}>
-                    {/* Visual rendering for each type */}
                     {device.type === 'switch' && (
                       <div className="w-32 h-12 flex flex-col justify-between p-1 bg-slate-900 rounded border border-slate-700">
                         <div className="text-[6px] text-center text-slate-500 font-bold">CISCO CATALYST 24P</div>
                         <div className="grid grid-cols-12 gap-0.5">
                           {[...Array(24)].map((_, i) => (
                             <div key={i} className="w-1.5 h-1.5 bg-black rounded-[1px] border border-slate-800 flex items-center justify-center">
-                              {i < connections.filter(c => c.sourceId === device.id || c.targetId === device.id).length && (
+                              {i < getWiredConnectionCount(device.id) && (
                                 <div className="w-1 h-1 bg-green-500 rounded-full animate-pulse-fast"></div>
                               )}
                             </div>
@@ -534,13 +563,13 @@ export default function NetworkLab() {
                         <div className="absolute -top-2 -left-2 w-1 h-6 bg-slate-500 rounded -rotate-12"></div>
                       </div>
                     )}
-                    {device.type === 'isp' && <Cloud size={60} className="text-sky-400" />}
-                    {['mobile', 'tablet', 'watch'].includes(device.type) && (
+                    {device.type === 'isp' && <Cloud size={60} className="text-sky-400 animate-bounce [animation-duration:3s]" />}
+                    {isWirelessClient(device.type) && (
                       <div className="relative p-2">
                         {device.type === 'mobile' && <Smartphone size={28} className="text-pink-400" />}
                         {device.type === 'tablet' && <Tablet size={32} className="text-pink-400" />}
                         {device.type === 'watch' && <Watch size={20} className="text-pink-400" />}
-                        {isActive && <div className="absolute -top-1 -right-1 bg-purple-500 rounded-full p-0.5"><Wifi size={8} className="text-white"/></div>}
+                        {isActive && <div className="absolute -top-1 -right-1 bg-purple-500 rounded-full p-0.5 shadow-lg"><Wifi size={8} className="text-white"/></div>}
                       </div>
                     )}
                     {device.type === 'modem' && (
@@ -554,7 +583,6 @@ export default function NetworkLab() {
                       </div>
                     )}
 
-                    {/* Connection LED */}
                     {device.type !== 'switch' && device.type !== 'modem' && (
                       <div className="absolute bottom-1 right-1">
                         <Led status={isActive ? 'on' : 'off'} />
@@ -572,9 +600,8 @@ export default function NetworkLab() {
           </div>
         </div>
 
-        {/* PING Modal (CLI) */}
         {isPingModalOpen && currentSelected && (
-          <div className="absolute inset-0 bg-black/60 z-50 flex items-center justify-center backdrop-blur-sm p-4">
+          <div className="absolute inset-0 bg-black/60 z-50 flex items-center justify-center backdrop-blur-sm p-4 animate-in fade-in zoom-in duration-200">
             <div className="bg-slate-950 w-full max-w-2xl h-[500px] rounded-xl shadow-2xl border border-slate-700 flex flex-col font-mono overflow-hidden">
               <div className="bg-slate-900 p-3 border-b border-slate-800 flex justify-between items-center px-4">
                 <div className="flex items-center gap-2 text-xs font-bold text-slate-300 uppercase tracking-widest">
@@ -604,14 +631,13 @@ export default function NetworkLab() {
                    />
                 </div>
               </div>
-              <div className="p-2 bg-slate-900/50 text-[10px] text-slate-500 text-center">Nhấn 'Enter' để thực hiện lệnh Ping</div>
+              <div className="p-2 bg-slate-900/50 text-[10px] text-slate-500 text-center uppercase tracking-widest font-bold">Nhấn 'Enter' để thực hiện lệnh Ping</div>
             </div>
           </div>
         )}
       </main>
 
-      {/* AI Assistant Sidebar */}
-      <section className="w-80 bg-slate-800 border-l border-slate-700 flex flex-col z-20 shadow-2xl shrink-0">
+      <aside className="w-80 bg-slate-800 border-l border-slate-700 flex flex-col z-20 shadow-2xl shrink-0">
         <div className="p-4 border-b border-slate-700 bg-slate-900/50">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center shadow-lg shadow-blue-900/20">
@@ -662,17 +688,17 @@ export default function NetworkLab() {
              <button 
                onClick={askAssistant}
                disabled={isAiLoading || !aiInput.trim()}
-               className="absolute right-2 top-2 p-1.5 text-blue-500 hover:bg-blue-500/10 rounded-lg disabled:opacity-20 transition-all"
+               className="absolute right-2 top-2 p-1.5 text-blue-500 hover:bg-blue-500/10 rounded-lg disabled:opacity-20 transition-all active:scale-90"
              >
                <Send size={16} />
              </button>
            </div>
            <div className="flex items-center justify-between mt-3 px-1">
-              <span className="text-[8px] text-slate-500 font-bold">GEMINI 2.0 FLASH</span>
+              <span className="text-[8px] text-slate-500 font-bold uppercase">Gemini 3 Flash</span>
               <button onClick={() => { setDevices([]); setConnections([]); setChatHistory([{ role: 'assistant', content: 'Đã làm mới phòng lab. Hãy bắt đầu kéo thiết bị mới nhé!' }]); }} className="text-[8px] text-red-400 font-bold uppercase hover:underline">Reset Lab</button>
            </div>
         </div>
-      </section>
+      </aside>
     </div>
   );
 }
