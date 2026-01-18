@@ -4,7 +4,7 @@ import { Device, Connection } from "../types";
 
 // ⚠️ QUAN TRỌNG: Dán trực tiếp API Key của bạn vào giữa dấu ngoặc kép bên dưới
 // Key bắt đầu bằng chữ "AIza..."
-const API_KEY_HARDCODED = "AIzaSyAUwiBrpNAwo9m4OH32jXH_oKRTi0bCMg4";
+const API_KEY_HARDCODED = "AIzaSyCTQRT7sV9VnQOgBC0DATherzMimT484t4";
 
 const genAI = new GoogleGenerativeAI(API_KEY_HARDCODED);
 
