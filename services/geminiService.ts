@@ -4,8 +4,8 @@ import { GoogleGenAI } from "@google/genai";
 import { Device, Connection } from "../types";
 
 // Always initialize with the named parameter 'apiKey' and use process.env.API_KEY directly
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-
+// const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
 /**
  * Phân tích sơ đồ mạng và đưa ra lời khuyên sử dụng Gemini API.
  */
