@@ -4,7 +4,7 @@ import { Device, Connection } from "../types";
 
 // 1. Lấy API Key
 const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-
+// doi moi
 // 2. Khởi tạo Instance (Thêm check null để tránh crash trang web nếu chưa load được key)
 const genAI = new GoogleGenerativeAI(apiKey || "");
 
