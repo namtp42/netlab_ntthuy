@@ -609,7 +609,7 @@ export default function NetworkLab() {
                 </div>
                 <button onClick={() => setIsPingModalOpen(false)} className="text-slate-500 hover:text-red-400 transition-colors"><XCircle size={18}/></button>
               </div>
-              
+              {/* Đây là comment trong JSX */}
               <div className="flex-1 p-4 overflow-y-auto text-xs space-y-1 text-slate-300 scroll-smooth">
                 <div className="text-slate-500 opacity-50 mb-4 italic">Cisco IOS Software, Version 15.2, Simulation Environment</div>
                 {logs.map(log => (
