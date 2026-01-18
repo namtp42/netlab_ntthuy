@@ -619,7 +619,7 @@ export default function NetworkLab() {
                   </div>
                 ))}
                 <div className="flex items-center gap-2 mt-4 pt-4 border-t border-slate-800/50">
-                   <span className="text-emerald-500 font-bold">{currentSelected.name}></span>
+                   <span className="text-emerald-500 font-bold">{currentSelected.name}</span>
                    <span className="text-slate-500">ping</span>
                    <input 
                     autoFocus
