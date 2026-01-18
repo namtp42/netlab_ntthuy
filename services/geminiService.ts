@@ -9,7 +9,11 @@ const API_KEY_HARDCODED = "AIzaSyDcqRd_IlFJouA03NISHXYWSOk-TLYpmas";
 const genAI = new GoogleGenerativeAI(API_KEY_HARDCODED);
 
 // Dùng model này. Nếu vẫn lỗi, thử đổi thành "gemini-pro"
-const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+// ❌ Cũ:
+// const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
+// ✅ Mới (Sửa thành gemini-pro):
+const model = genAI.getGenerativeModel({ model: "gemini-pro" });
 
 export const getNetworkAdvice = async (nodes: Device[], links: Connection[], userQuery: string) => {
   const topologyInfo = {
