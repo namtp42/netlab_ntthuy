@@ -1,8 +1,8 @@
 /// <reference types="vite/client" />
 import { Device, Connection } from "../types";
 
-// Key của bạn
-const API_KEY = "AIzaSyDcqRd_IlFJouA03NISHXYWSOk-TLYpmas";
+// 👇 THAY KEY TỪ GMAIL KHÁC VÀO ĐÂY
+const API_KEY = "AIzaSyCBRhYk-XlVqzug4N6pMzc-5ByMvy5n3wc"; 
 
 export const getNetworkAdvice = async (nodes: Device[], links: Connection[], userQuery: string) => {
   const topologyInfo = {
@@ -22,37 +22,9 @@ export const getNetworkAdvice = async (nodes: Device[], links: Connection[], use
   `;
 
   try {
-    // BƯỚC 1: LẤY DANH SÁCH MODEL HỢP LỆ VỚI KEY NÀY
-    // (Tránh việc đoán mò tên model gây lỗi 404)
-    const modelsResponse = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models?key=${API_KEY}`
-    );
-    
-    if (!modelsResponse.ok) {
-      throw new Error("API Key không hợp lệ hoặc lỗi mạng khi lấy danh sách Model.");
-    }
-    
-    const modelsData = await modelsResponse.json();
-    
-    // Tìm model nào có chữ "flash" (nhanh/rẻ) hoặc "pro" và hỗ trợ generateContent
-    // Ưu tiên Flash 1.5 -> Pro -> Bất kỳ cái nào chạy được
-    const validModel = modelsData.models?.find((m: any) => 
-      m.name.includes('gemini-1.5-flash') && m.supportedGenerationMethods?.includes('generateContent')
-    ) || modelsData.models?.find((m: any) => 
-      m.supportedGenerationMethods?.includes('generateContent')
-    );
-
-    if (!validModel) {
-      throw new Error("Không tìm thấy Model nào khả dụng cho Key này.");
-    }
-
-    // Lấy tên chuẩn của model (ví dụ: models/gemini-1.5-flash-001)
-    const modelName = validModel.name.replace('models/', '');
-    console.log("Đang sử dụng Model:", modelName);
-
-    // BƯỚC 2: GỌI API VỚI MODEL VỪA TÌM ĐƯỢC
+    // Dùng model gemini-1.5-flash (Bản miễn phí tiêu chuẩn)
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${API_KEY}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -62,18 +34,21 @@ export const getNetworkAdvice = async (nodes: Device[], links: Connection[], use
       }
     );
 
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error?.message || "Lỗi khi gọi AI");
+    const data = await response.json();
+
+    // Bắt lỗi Quota (Hết tiền/Hết lượt)
+    if (data.error) {
+      if (data.error.message.includes('quota')) {
+        return "⚠️ Hết hạn mức miễn phí (Quota Exceeded). Vui lòng đổi API Key từ một Gmail khác.";
+      }
+      throw new Error(data.error.message);
     }
 
-    const data = await response.json();
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    
-    return text || "AI không trả về kết quả.";
+    return text || "AI không phản hồi.";
 
   } catch (error) {
     console.error("Gemini Error:", error);
-    return `Lỗi hệ thống: ${error instanceof Error ? error.message : "Không xác định"}. Hãy thử tạo API Key mới nếu lỗi vẫn còn.`;
+    return `Lỗi: ${error instanceof Error ? error.message : "Kết nối thất bại"}`;
   }
 };
