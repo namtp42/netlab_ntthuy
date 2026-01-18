@@ -1,4 +1,4 @@
-
+/// <reference types="vite/client" />
 import { GoogleGenAI } from "@google/genai";
 // Fixed imports: NetworkNode -> Device, NetworkLink -> Connection as per types.ts
 import { Device, Connection } from "../types";
