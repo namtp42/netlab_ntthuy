@@ -1,19 +1,8 @@
 /// <reference types="vite/client" />
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import { Device, Connection } from "../types";
 
-// ⚠️ QUAN TRỌNG: Dán trực tiếp API Key của bạn vào giữa dấu ngoặc kép bên dưới
-// Key bắt đầu bằng chữ "AIza..."
-const API_KEY_HARDCODED = "AIzaSyDcqRd_IlFJouA03NISHXYWSOk-TLYpmas";
-
-const genAI = new GoogleGenerativeAI(API_KEY_HARDCODED);
-
-// Dùng model này. Nếu vẫn lỗi, thử đổi thành "gemini-pro"
-// ❌ Cũ:
-// const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-
-// ✅ Mới (Sửa thành gemini-pro):
-const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+// Key của bạn (Tôi đã lấy từ code bạn gửi)
+const API_KEY = "AIzaSyDcqRd_IlFJouA03NISHXYWSOk-TLYpmas";
 
 export const getNetworkAdvice = async (nodes: Device[], links: Connection[], userQuery: string) => {
   const topologyInfo = {
@@ -25,22 +14,43 @@ export const getNetworkAdvice = async (nodes: Device[], links: Connection[], use
     })
   };
 
-  const prompt = `
-    Bạn là một chuyên gia về mạng máy tính (CCNA/Network+). 
-    Dưới đây là sơ đồ mạng hiện tại của người dùng:
-    ${JSON.stringify(topologyInfo, null, 2)}
-
-    Câu hỏi/Yêu cầu của người dùng: "${userQuery}"
-
-    Hãy phân tích mạng này, kiểm tra xem việc kết nối LAN đã đúng chưa, tư vấn về cấu hình IP hoặc các bước tiếp theo để mạng hoạt động. Trả lời bằng tiếng Việt một cách chuyên nghiệp và dễ hiểu.
+  const promptText = `
+    Bạn là chuyên gia mạng (CCNA). Sơ đồ mạng:
+    ${JSON.stringify(topologyInfo)}
+    
+    Câu hỏi: "${userQuery}"
+    
+    Hãy trả lời ngắn gọn, chuyên nghiệp bằng tiếng Việt.
   `;
 
   try {
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    return response.text();
+    // Dùng fetch trực tiếp, không qua thư viện SDK -> Tránh mọi lỗi tương thích
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          contents: [{
+            parts: [{ text: promptText }]
+          }]
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      console.error("Lỗi Google API:", errorData);
+      throw new Error(errorData.error?.message || "Lỗi không xác định từ Google");
+    }
+
+    const data = await response.json();
+    return data.candidates[0].content.parts[0].text;
+
   } catch (error) {
-    console.error("Gemini Error Chi Tiết:", error);
-    return "Lỗi kết nối AI: Vui lòng kiểm tra lại API Key.";
+    console.error("Gemini Error:", error);
+    return "Lỗi kết nối: " + (error instanceof Error ? error.message : "Vui lòng thử lại.");
   }
 };
