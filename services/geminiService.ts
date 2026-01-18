@@ -2,7 +2,7 @@
 import { Device, Connection } from "../types";
 
 // 👇 Dán Key mới của bạn vào đây (Key lấy từ Gmail khác)
-const API_KEY = "AIzaSy..........................."; 
+const API_KEY = "AIzaSyCBRhYk-XlVqzug4N6pMzc-5ByMvy5n3wc"; 
 
 export const getNetworkAdvice = async (nodes: Device[], links: Connection[], userQuery: string) => {
   const topologyInfo = {
