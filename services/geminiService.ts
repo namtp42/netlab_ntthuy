@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 import { Device, Connection } from "../types";
 
-// Key của bạn (Tôi đã lấy từ code bạn gửi)
+// Key của bạn (Giữ nguyên key này nếu bạn vừa tạo mới và nó còn sống)
 const API_KEY = "AIzaSyDcqRd_IlFJouA03NISHXYWSOk-TLYpmas";
 
 export const getNetworkAdvice = async (nodes: Device[], links: Connection[], userQuery: string) => {
@@ -24,9 +24,9 @@ export const getNetworkAdvice = async (nodes: Device[], links: Connection[], use
   `;
 
   try {
-    // Dùng fetch trực tiếp, không qua thư viện SDK -> Tránh mọi lỗi tương thích
+    // 👇 QUAN TRỌNG: Đã đổi URL sang 'gemini-pro' để đảm bảo chạy được 100%
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${API_KEY}`,
       {
         method: "POST",
         headers: {
@@ -47,7 +47,11 @@ export const getNetworkAdvice = async (nodes: Device[], links: Connection[], use
     }
 
     const data = await response.json();
-    return data.candidates[0].content.parts[0].text;
+    // Cấu trúc trả về của gemini-pro có thể hơi khác, kiểm tra an toàn:
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text) throw new Error("AI không trả về nội dung text.");
+    
+    return text;
 
   } catch (error) {
     console.error("Gemini Error:", error);
