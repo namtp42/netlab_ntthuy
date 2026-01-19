@@ -3,7 +3,7 @@ import { Device, Connection } from "../types";
 
 // Key của bạn (Giữ nguyên, key này đang sống tốt)
 const API_KEY = "AIzaSyAVHoyfjlXamUt8Wf_IUvsI6_0Ks4VWGaA";
-
+//1
 export const getNetworkAdvice = async (nodes: Device[], links: Connection[], userQuery: string) => {
   const topologyInfo = {
     devices: nodes.map(n => ({ type: n.type, name: n.name, ip: n.ip })),
