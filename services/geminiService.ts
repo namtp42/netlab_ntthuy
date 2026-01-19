@@ -1,9 +1,14 @@
 /// <reference types="vite/client" />
 import { Device, Connection } from "../types";
-
-// Key của bạn (Giữ nguyên, key này đang sống tốt)
-const API_KEY = "AIzaSyAVHoyfjlXamUt8Wf_IUvsI6_0Ks4VWGaA";
 //1
+//2
+// Key của bạn (Giữ nguyên, key này đang sống tốt)
+const API_KEY = "AIzaSyAVHoyfjlXamUt8Wf_IUvsI6_0Ks4VWGaAc";
+//<<<<<<< HEAD
+
+//=======
+
+//>>>>>>> 360435c348aa142adb14930e44ee43f75b5a712d
 export const getNetworkAdvice = async (nodes: Device[], links: Connection[], userQuery: string) => {
   const topologyInfo = {
     devices: nodes.map(n => ({ type: n.type, name: n.name, ip: n.ip })),
