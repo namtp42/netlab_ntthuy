@@ -1,13 +1,13 @@
 
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef } from 'react';
 import { 
   Monitor, Network, Trash2, Cable, Activity, Settings, Terminal, 
-  Router as RouterIcon, Globe, Cloud, Zap, XCircle, ZoomIn, ZoomOut, 
-  Smartphone, Tablet, Watch, Laptop, Wifi, Send, ChevronRight, Lock, WifiHigh,
-  Cpu, Link as LinkIcon, Database
+  Router as RouterIcon, Globe, Cloud, ZoomIn, ZoomOut, 
+  Smartphone, Tablet, Watch, Laptop, Wifi, XCircle, WifiHigh,
+  Lock, Database, Key, ShieldCheck, AlertTriangle, Download, Camera
 } from 'lucide-react';
-import { Device, DeviceType, Connection, Log, ToolMode, ChatMessage } from './types';
-import { getNetworkAdvice } from './services/geminiService';
+import { toPng } from 'html-to-image';
+import { Device, DeviceType, Connection, Log, ToolMode } from './types';
 
 // --- Helpers ---
 const generateMac = () => {
@@ -43,11 +43,23 @@ export default function NetworkLab() {
   const [isPingModalOpen, setIsPingModalOpen] = useState(false);
   const [pingTargetIP, setPingTargetIP] = useState('');
   const [zoom, setZoom] = useState(1);
-  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([
-    { role: 'assistant', content: 'Chào mừng bạn đến với NetLab Pro. Tôi có thể giúp bạn thiết kế và kiểm tra hệ thống mạng LAN/WAN này!' }
-  ]);
-  const [aiInput, setAiInput] = useState('');
-  const [isAiLoading, setIsAiLoading] = useState(false);
+  const [isCapturing, setIsCapturing] = useState(false);
+
+  // Wifi Auth States
+  const [wifiAuthModal, setWifiAuthModal] = useState<{
+    isOpen: boolean;
+    sourceId: string;
+    targetId: string;
+    apId: string;
+    ssid: string;
+    password: string;
+  }>({ isOpen: false, sourceId: '', targetId: '', apId: '', ssid: '', password: '' });
+
+  // Delete Confirmation State
+  const [deleteConfirmModal, setDeleteConfirmModal] = useState<{
+    isOpen: boolean;
+    deviceId: string | null;
+  }>({ isOpen: false, deviceId: null });
 
   const workspaceRef = useRef<HTMLDivElement>(null);
 
@@ -95,23 +107,27 @@ export default function NetworkLab() {
     addLog(`Đã thêm ${newDevice.name}`, 'info');
   };
 
-  const getWiredConnectionCount = (deviceId: string) => {
-    return connections.filter(c => {
-      if (c.sourceId !== deviceId && c.targetId !== deviceId) return false;
-      const s = devices.find(d => d.id === c.sourceId);
-      const t = devices.find(d => d.id === c.targetId);
-      if (!s || !t) return false;
-      return !isWirelessClient(s.type) && !isWirelessClient(t.type);
-    }).length;
+  const finalizeConnection = (sourceId: string, targetId: string) => {
+    const newConn: Connection = { id: `${sourceId}-${targetId}`, sourceId, targetId };
+    setConnections(prev => [...prev, newConn]);
+    setCableStart(null);
+  };
+
+  const finalizeDeleteDevice = () => {
+    const id = deleteConfirmModal.deviceId;
+    if (!id) return;
+
+    setDevices(devices.filter(d => d.id !== id));
+    setConnections(connections.filter(c => c.sourceId !== id && c.targetId !== id));
+    if (selectedDevice === id) setSelectedDevice(null);
+    addLog('Đã xóa thiết bị', 'error');
+    setDeleteConfirmModal({ isOpen: false, deviceId: null });
   };
 
   const handleMouseDown = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
     if (mode === ToolMode.DELETE) {
-      setDevices(devices.filter(d => d.id !== id));
-      setConnections(connections.filter(c => c.sourceId !== id && c.targetId !== id));
-      if (selectedDevice === id) setSelectedDevice(null);
-      addLog('Đã xóa thiết bị', 'error');
+      setDeleteConfirmModal({ isOpen: true, deviceId: id });
       return;
     }
 
@@ -129,15 +145,26 @@ export default function NetworkLab() {
         const targetDev = devices.find(d => d.id === id);
         if (!sourceDev || !targetDev) return;
 
-        const isCurrentActionWireless = isWirelessClient(sourceDev.type) || isWirelessClient(targetDev.type);
+        const isSourceWireless = isWirelessClient(sourceDev.type);
+        const isTargetWireless = isWirelessClient(targetDev.type);
         const hasAPInvolved = sourceDev.type === 'access_point' || targetDev.type === 'access_point';
+        const apDevice = sourceDev.type === 'access_point' ? sourceDev : (targetDev.type === 'access_point' ? targetDev : null);
         
-        if (isCurrentActionWireless) {
+        if (isSourceWireless || isTargetWireless) {
           if (!hasAPInvolved) {
             addLog('Thiết bị di động chỉ có thể kết nối không dây với Access Point!', 'error');
             setCableStart(null);
             return;
           }
+          setWifiAuthModal({
+            isOpen: true,
+            sourceId: cableStart,
+            targetId: id,
+            apId: apDevice!.id,
+            ssid: '',
+            password: ''
+          });
+          return;
         } else {
           const sourceWiredCount = getWiredConnectionCount(cableStart);
           const targetWiredCount = getWiredConnectionCount(id);
@@ -154,10 +181,8 @@ export default function NetworkLab() {
           }
         }
 
-        const newConn: Connection = { id: `${cableStart}-${id}`, sourceId: cableStart, targetId: id };
-        setConnections([...connections, newConn]);
-        setCableStart(null);
-        addLog(isCurrentActionWireless ? 'Kết nối Wifi thành công!' : 'Cắm dây mạng thành công!', 'success');
+        finalizeConnection(cableStart, id);
+        addLog('Cắm dây mạng thành công!', 'success');
       }
       return;
     }
@@ -171,6 +196,29 @@ export default function NetworkLab() {
         setOffset({ x: (e.clientX - rect.left) / zoom - dev.x, y: (e.clientY - rect.top) / zoom - dev.y });
       }
     }
+  };
+
+  const handleWifiAuth = () => {
+    const ap = devices.find(d => d.id === wifiAuthModal.apId);
+    if (!ap) return;
+
+    if (wifiAuthModal.ssid === ap.ssid && wifiAuthModal.password === ap.password) {
+      finalizeConnection(wifiAuthModal.sourceId, wifiAuthModal.targetId);
+      addLog(`Connected: Đã kết nối thành công tới ${ap.name}`, 'success');
+      setWifiAuthModal({ ...wifiAuthModal, isOpen: false });
+    } else {
+      addLog('Lỗi: SSID hoặc Mật khẩu Wifi không chính xác!', 'error');
+    }
+  };
+
+  const getWiredConnectionCount = (deviceId: string) => {
+    return connections.filter(c => {
+      if (c.sourceId !== deviceId && c.targetId !== deviceId) return false;
+      const s = devices.find(d => d.id === c.sourceId);
+      const t = devices.find(d => d.id === c.targetId);
+      if (!s || !t) return false;
+      return !isWirelessClient(s.type) && !isWirelessClient(t.type);
+    }).length;
   };
 
   const handleDeleteConnection = (e: React.MouseEvent, connectionId: string) => {
@@ -251,19 +299,33 @@ export default function NetworkLab() {
     }, 1000);
   };
 
-  const askAssistant = async () => {
-    if (!aiInput.trim()) return;
-    const msg = aiInput;
-    setAiInput('');
-    setChatHistory(prev => [...prev, { role: 'user', content: msg }]);
-    setIsAiLoading(true);
+  const saveAsImage = async () => {
+    if (!workspaceRef.current) return;
+    setIsCapturing(true);
+    addLog('Đang chuẩn bị ảnh sơ đồ...', 'info');
 
-    const nodes = devices.map(d => ({ ...d, label: d.name }));
-    const links = connections.map(c => ({ ...c, sourceId: c.sourceId, targetId: c.targetId }));
-    
-    const advice = await getNetworkAdvice(nodes as any, links as any, msg);
-    setChatHistory(prev => [...prev, { role: 'assistant', content: advice || 'Tôi chưa có câu trả lời phù hợp.' }]);
-    setIsAiLoading(false);
+    try {
+      // Create a temporary clone or adjust the capture to include full canvas
+      const dataUrl = await toPng(workspaceRef.current, {
+        cacheBust: true,
+        backgroundColor: '#0f172a', // matches slate-900
+        style: {
+          transform: 'scale(1)',
+          transformOrigin: 'top left'
+        }
+      });
+      
+      const link = document.createElement('a');
+      link.download = `NetLab_Result_${new Date().getTime()}.png`;
+      link.href = dataUrl;
+      link.click();
+      addLog('Đã lưu ảnh sơ đồ thành công!', 'success');
+    } catch (err) {
+      console.error(err);
+      addLog('Lỗi khi xuất ảnh sơ đồ.', 'error');
+    } finally {
+      setIsCapturing(false);
+    }
   };
 
   const renderCables = () => {
@@ -292,23 +354,21 @@ export default function NetworkLab() {
       return (
         <g 
           key={conn.id} 
-          className={`${mode === ToolMode.DELETE ? 'cursor-pointer' : 'pointer-events-none'}`}
+          className={`${mode === ToolMode.DELETE ? 'cursor-pointer' : ''}`}
           onClick={(e) => handleDeleteConnection(e, conn.id)}
         >
-          {/* Invisible thicker hitbox for easier clicking */}
           <line 
             x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} 
             stroke="transparent" 
             strokeWidth="15" 
             className="pointer-events-auto"
           />
-          {/* Visible line */}
           <line 
             x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} 
             stroke={stroke} 
             strokeWidth="3" 
             strokeDasharray={dash} 
-            className={`opacity-70 transition-colors ${mode === ToolMode.DELETE ? 'hover:stroke-red-500' : ''}`}
+            className={`opacity-70 transition-colors pointer-events-none ${mode === ToolMode.DELETE ? 'hover:stroke-red-500' : ''}`}
           />
           {isWireless && (
             <circle cx={(p1.x + p2.x)/2} cy={(p1.y + p2.y)/2} r="4" fill="#a855f7" className="animate-ping opacity-50" />
@@ -320,6 +380,8 @@ export default function NetworkLab() {
 
   const currentSelected = devices.find(d => d.id === selectedDevice);
   const isInternetConnected = currentSelected ? checkConnectionToType(currentSelected.id, 'isp') : false;
+
+  const deviceToDelete = devices.find(d => d.id === deleteConfirmModal.deviceId);
 
   return (
     <div className="flex h-screen bg-slate-900 overflow-hidden font-sans text-slate-100">
@@ -432,6 +494,33 @@ export default function NetworkLab() {
                   </div>
                 )}
 
+                {currentSelected.type === 'access_point' && (
+                  <div className="pt-1 space-y-3">
+                    <div>
+                      <label className="flex items-center gap-1 text-[9px] text-slate-500 font-bold mb-1 uppercase tracking-tight">
+                        <WifiHigh size={10} /> TÊN TRUY CẬP (SSID)
+                      </label>
+                      <input 
+                        className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-blue-300 focus:border-blue-500 outline-none"
+                        value={currentSelected.ssid || ''}
+                        onChange={(e) => setDevices(devices.map(d => d.id === currentSelected.id ? { ...d, ssid: e.target.value } : d))}
+                      />
+                    </div>
+                    <div>
+                      <label className="flex items-center gap-1 text-[9px] text-slate-500 font-bold mb-1 uppercase tracking-tight">
+                        <Lock size={10} /> MẬT KHẨU TRUY CẬP
+                      </label>
+                      <input 
+                        type="password"
+                        className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-blue-300 focus:border-blue-500 outline-none"
+                        value={currentSelected.password || ''}
+                        placeholder="Để trống nếu không bảo mật"
+                        onChange={(e) => setDevices(devices.map(d => d.id === currentSelected.id ? { ...d, password: e.target.value } : d))}
+                      />
+                    </div>
+                  </div>
+                )}
+
                 {currentSelected.type === 'switch' && (
                    <div className="pt-2 border-t border-slate-800 space-y-2">
                       <div className="flex items-center gap-2 text-[10px] font-bold text-slate-400 mb-1">
@@ -481,6 +570,10 @@ export default function NetworkLab() {
               </div>
             </section>
           )}
+
+          <div className="pt-4 border-t border-slate-700">
+            <button onClick={() => { setDevices([]); setConnections([]); addLog('Đã làm mới phòng lab', 'info'); }} className="w-full py-2 bg-red-900/30 hover:bg-red-900/50 border border-red-700/50 rounded text-[10px] font-bold uppercase tracking-wider text-red-400 transition-all active:scale-95">Làm mới phòng Lab</button>
+          </div>
         </div>
       </aside>
 
@@ -497,6 +590,15 @@ export default function NetworkLab() {
           </div>
 
           <div className="flex gap-2 pointer-events-auto">
+            <button 
+              onClick={saveAsImage} 
+              disabled={isCapturing}
+              className={`p-2 bg-slate-800 hover:bg-slate-700 rounded-lg border border-slate-700 shadow-xl transition-all active:scale-90 flex items-center gap-2 text-xs font-bold ${isCapturing ? 'opacity-50 cursor-not-allowed' : ''}`}
+            >
+              <Camera size={16} className={isCapturing ? 'animate-spin' : ''} />
+              <span className="hidden sm:inline">LƯU ẢNH SƠ ĐỒ</span>
+            </button>
+            <div className="w-px h-full bg-slate-700 mx-1"></div>
             <button onClick={() => setZoom(Math.max(0.5, zoom - 0.1))} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg border border-slate-700 shadow-xl transition-all active:scale-90"><ZoomOut size={16}/></button>
             <div className="bg-slate-800 px-3 flex items-center text-xs font-bold rounded-lg border border-slate-700 shadow-xl">{Math.round(zoom * 100)}%</div>
             <button onClick={() => setZoom(Math.min(2, zoom + 0.1))} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg border border-slate-700 shadow-xl transition-all active:scale-90"><ZoomIn size={16}/></button>
@@ -510,7 +612,6 @@ export default function NetworkLab() {
           onMouseUp={handleMouseUp}
         >
           <div style={{ transform: `scale(${zoom})`, transformOrigin: '0 0', width: '200%', height: '200%' }}>
-            {/* REMOVED pointer-events-none from SVG to allow cable interaction */}
             <svg className="absolute top-0 left-0 w-full h-full">
               {renderCables()}
               {cableStart && (
@@ -600,6 +701,108 @@ export default function NetworkLab() {
           </div>
         </div>
 
+        {/* Modal: Delete Confirmation */}
+        {deleteConfirmModal.isOpen && deviceToDelete && (
+          <div className="absolute inset-0 bg-black/70 z-[110] flex items-center justify-center backdrop-blur-sm p-4 animate-in fade-in zoom-in duration-200">
+            <div className="bg-slate-900 w-full max-w-sm rounded-2xl shadow-2xl border border-red-500/30 overflow-hidden">
+              <div className="bg-red-500/10 p-4 border-b border-red-500/20 flex items-center gap-3">
+                <div className="bg-red-500/20 p-2 rounded-lg">
+                  <AlertTriangle size={20} className="text-red-400" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm text-red-200">Xác nhận xóa</h3>
+                  <p className="text-[10px] text-red-400 uppercase tracking-widest font-bold">Thao tác không thể hoàn tác</p>
+                </div>
+              </div>
+              
+              <div className="p-6 space-y-4 text-center">
+                <p className="text-xs text-slate-300">
+                  Bạn có chắc chắn muốn xóa thiết bị <span className="text-white font-bold">{deviceToDelete.name}</span>? 
+                  Mọi kết nối liên quan sẽ bị gỡ bỏ.
+                </p>
+
+                <div className="flex gap-3 pt-2">
+                  <button 
+                    onClick={() => setDeleteConfirmModal({ isOpen: false, deviceId: null })}
+                    className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-xl text-xs font-bold transition-all active:scale-95"
+                  >
+                    Hủy bỏ
+                  </button>
+                  <button 
+                    onClick={finalizeDeleteDevice}
+                    className="flex-1 py-2.5 bg-red-600 hover:bg-red-500 rounded-xl text-xs font-bold shadow-lg shadow-red-900/40 transition-all active:scale-95"
+                  >
+                    Xác nhận xóa
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal: Wifi Authentication */}
+        {wifiAuthModal.isOpen && (
+          <div className="absolute inset-0 bg-black/70 z-[100] flex items-center justify-center backdrop-blur-sm p-4 animate-in fade-in duration-300">
+            <div className="bg-slate-900 w-full max-w-sm rounded-2xl shadow-2xl border border-slate-700 overflow-hidden">
+              <div className="bg-slate-800 p-4 border-b border-slate-700 flex items-center gap-3">
+                <div className="bg-purple-500/20 p-2 rounded-lg">
+                  <WifiHigh size={20} className="text-purple-400" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm">Cấu hình Wifi</h3>
+                  <p className="text-[10px] text-slate-400 uppercase tracking-widest font-bold">Authentication Required</p>
+                </div>
+              </div>
+              
+              <div className="p-6 space-y-4">
+                <div>
+                  <label className="block text-[9px] text-slate-500 font-bold mb-1.5 uppercase tracking-widest">Tên mạng (SSID)</label>
+                  <div className="relative">
+                    <Wifi size={14} className="absolute left-3 top-3 text-slate-500" />
+                    <input 
+                      autoFocus
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-10 pr-4 py-2.5 text-xs text-slate-200 focus:border-blue-500 outline-none transition-all"
+                      placeholder="Nhập tên Wifi..."
+                      value={wifiAuthModal.ssid}
+                      onChange={(e) => setWifiAuthModal({ ...wifiAuthModal, ssid: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[9px] text-slate-500 font-bold mb-1.5 uppercase tracking-widest">Mật khẩu Wifi</label>
+                  <div className="relative">
+                    <Key size={14} className="absolute left-3 top-3 text-slate-500" />
+                    <input 
+                      type="password"
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-10 pr-4 py-2.5 text-xs text-slate-200 focus:border-blue-500 outline-none transition-all"
+                      placeholder="Nhập mật khẩu..."
+                      value={wifiAuthModal.password}
+                      onChange={(e) => setWifiAuthModal({ ...wifiAuthModal, password: e.target.value })}
+                      onKeyDown={(e) => e.key === 'Enter' && handleWifiAuth()}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex gap-3 pt-2">
+                  <button 
+                    onClick={() => { setWifiAuthModal({ ...wifiAuthModal, isOpen: false }); setCableStart(null); }}
+                    className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-xl text-xs font-bold transition-all active:scale-95"
+                  >
+                    Hủy bỏ
+                  </button>
+                  <button 
+                    onClick={handleWifiAuth}
+                    className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-500 rounded-xl text-xs font-bold shadow-lg shadow-blue-900/40 transition-all active:scale-95 flex items-center justify-center gap-2"
+                  >
+                    <ShieldCheck size={14} /> Kết nối
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {isPingModalOpen && currentSelected && (
           <div className="absolute inset-0 bg-black/60 z-50 flex items-center justify-center backdrop-blur-sm p-4 animate-in fade-in zoom-in duration-200">
             <div className="bg-slate-950 w-full max-w-2xl h-[500px] rounded-xl shadow-2xl border border-slate-700 flex flex-col font-mono overflow-hidden">
@@ -609,7 +812,7 @@ export default function NetworkLab() {
                 </div>
                 <button onClick={() => setIsPingModalOpen(false)} className="text-slate-500 hover:text-red-400 transition-colors"><XCircle size={18}/></button>
               </div>
-              {/* Đây là comment trong JSX */}
+              
               <div className="flex-1 p-4 overflow-y-auto text-xs space-y-1 text-slate-300 scroll-smooth">
                 <div className="text-slate-500 opacity-50 mb-4 italic">Cisco IOS Software, Version 15.2, Simulation Environment</div>
                 {logs.map(log => (
@@ -619,7 +822,7 @@ export default function NetworkLab() {
                   </div>
                 ))}
                 <div className="flex items-center gap-2 mt-4 pt-4 border-t border-slate-800/50">
-                   <span className="text-emerald-500 font-bold">{currentSelected.name}</span>
+                   <span className="text-emerald-500 font-bold">{currentSelected.name}></span>
                    <span className="text-slate-500">ping</span>
                    <input 
                     autoFocus
@@ -636,69 +839,6 @@ export default function NetworkLab() {
           </div>
         )}
       </main>
-
-      <aside className="w-80 bg-slate-800 border-l border-slate-700 flex flex-col z-20 shadow-2xl shrink-0">
-        <div className="p-4 border-b border-slate-700 bg-slate-900/50">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center shadow-lg shadow-blue-900/20">
-              <Zap size={16} className="text-white" />
-            </div>
-            <div>
-              <h2 className="font-bold text-sm">Trợ lý NetAI</h2>
-              <div className="flex items-center gap-1 text-[8px] text-slate-500 uppercase font-bold tracking-widest">
-                <div className="w-1 h-1 bg-green-500 rounded-full animate-pulse"></div> Online
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-900/30">
-          {chatHistory.map((msg, i) => (
-            <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-[90%] p-3 rounded-2xl text-xs shadow-sm ${
-                msg.role === 'user' 
-                  ? 'bg-blue-600 text-white rounded-tr-none' 
-                  : 'bg-slate-800 border border-slate-700 text-slate-300 rounded-tl-none'
-              }`}>
-                {msg.content}
-              </div>
-            </div>
-          ))}
-          {isAiLoading && (
-             <div className="flex justify-start">
-               <div className="bg-slate-800 p-3 rounded-2xl rounded-tl-none border border-slate-700 flex gap-1">
-                 <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce"></div>
-                 <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce [animation-delay:0.2s]"></div>
-                 <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce [animation-delay:0.4s]"></div>
-               </div>
-             </div>
-          )}
-        </div>
-
-        <div className="p-4 bg-slate-800 border-t border-slate-700">
-           <div className="relative">
-             <input 
-               type="text" 
-               placeholder="Hỏi về cấu hình mạng..."
-               className="w-full pl-4 pr-10 py-3 bg-slate-900 border-none rounded-xl text-xs focus:ring-2 focus:ring-blue-500 outline-none transition-all placeholder:text-slate-600"
-               value={aiInput}
-               onChange={(e) => setAiInput(e.target.value)}
-               onKeyDown={(e) => e.key === 'Enter' && askAssistant()}
-             />
-             <button 
-               onClick={askAssistant}
-               disabled={isAiLoading || !aiInput.trim()}
-               className="absolute right-2 top-2 p-1.5 text-blue-500 hover:bg-blue-500/10 rounded-lg disabled:opacity-20 transition-all active:scale-90"
-             >
-               <Send size={16} />
-             </button>
-           </div>
-           <div className="flex items-center justify-between mt-3 px-1">
-              <span className="text-[8px] text-slate-500 font-bold uppercase">Gemini 3 Flash</span>
-              <button onClick={() => { setDevices([]); setConnections([]); setChatHistory([{ role: 'assistant', content: 'Đã làm mới phòng lab. Hãy bắt đầu kéo thiết bị mới nhé!' }]); }} className="text-[8px] text-red-400 font-bold uppercase hover:underline">Reset Lab</button>
-           </div>
-        </div>
-      </aside>
     </div>
   );
 }
